@@ -46,6 +46,33 @@
             word-wrap: break-word;
         }
 
+        #preview:active {
+            background-color: #e8e8e8;
+            scale: 0.8;
+        }
+
+        .preview-wrapper {
+            position: fixed;
+            bottom: 0;
+            right: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        #preview {
+            width: 75px;
+            height: 75px;
+            border: none;
+            border-radius: 20px;
+            margin: 10px;
+            box-shadow: 0px 0px 5px 1px #222222;
+            background-color: #f8f8f8;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
     </style>
 
     <script type="application/ld+json">
@@ -73,7 +100,14 @@
 </head>
 <body>
     <base target="_blank">
+    <div class="preview-wrapper">
+        <code>Preview <br/>(Esc)</code>
+        <button id="preview" title="Preview">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12,9A3,3 0 0,1 15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 12,9M12,4.5C17,4.5 21.27,7.61 23,12C21.27,16.39 17,19.5 12,19.5C7,19.5 2.73,16.39 1,12C2.73,7.61 7,4.5 12,4.5M3.18,12C4.83,15.36 8.24,17.5 12,17.5C15.76,17.5 19.17,15.36 20.82,12C19.17,8.64 15.76,6.5 12,6.5C8.24,6.5 4.83,8.64 3.18,12Z" /></svg></svg>
+        </button>
+    </div>
     <div id="editor" contenteditable="true" aria-label="Markdown editor" role="textbox"></div>
+    
 
     <script>
         async function compress(text) {
@@ -132,9 +166,6 @@
             })
         }
 
-        function handleRenderMarkdown(ev) {
-            renderMarkdown(ev.target);
-        }
 
         async function handleRenderRaw() {
             const q = window.location.search.substring(1).split('=')[1];
@@ -153,13 +184,21 @@
             var isActive = false;
             editor.addEventListener('keydown', (e) => {
                 if (e.key == 'Escape') {
-                    handleRenderMarkdown(e);
+                    renderMarkdown(editor);
                     isActive = false;
                 }
             })
             editor.addEventListener('click', (e) => {
                 if (!isActive) handleRenderRaw(e);
                 isActive = true;
+            })
+
+            const previewButton = document.getElementById('preview');
+            previewButton.addEventListener('click', (e) => {
+                if (isActive) {
+                    renderMarkdown(editor);
+                    isActive = false;
+                }
             })
         }
 
