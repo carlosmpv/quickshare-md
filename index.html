@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+
+    <style>
+        html, body {
+            margin: 0px;
+            padding: 0px;
+        }
+
+
+        #editor {
+            width: 100vw;
+            height: 100vh;
+            overflow-y: scroll;
+            padding: 2em;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+    </style>
+</head>
+<body>
+    <base target="_blank">
+    <div id="editor" contenteditable="true"></div>
+
+    <script>
+        async function compress(text) {
+            const readableStream = new ReadableStream({
+                start(controler) {
+                    controler.enqueue(new TextEncoder().encode(text));
+                    controler.close();
+                }
+            })
+
+            const compressionStream = readableStream.pipeThrough(
+                new CompressionStream("gzip")
+            )
+
+            const blob = await new Response(compressionStream).blob();
+            return await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        async function decompress(q) {
+            const bin = atob(q);
+            const bytes = Uint8Array.from(bin, c => c.charCodeAt(0))
+            const stream = new ReadableStream({
+                start(controler) {
+                    controler.enqueue(bytes);
+                    controler.close();
+                }
+            })
+
+            const decompressed = stream.pipeThrough(
+                new DecompressionStream("gzip")
+            );
+
+            return await new Response(decompressed).text();
+        }
+
+        function storeStateOnURL(b64) {
+            window.history.pushState({}, '', `?q=${b64}`);
+        }
+
+        function handleTextEdit(ev) {
+            compress(ev.target.innerText).then(storeStateOnURL)
+        }
+
+        function renderMarkdown(target) {
+            target.innerHTML = marked.parse(target.innerText)
+            
+            target.querySelectorAll('a').forEach(link => {
+                link.setAttribute('contenteditable', 'false');
+                link.addEventListener('click', (e) => {
+                    console.log('clicou no link')
+                    e.stopPropagation();
+                });
+            })
+        }
+
+        function handleRenderMarkdown(ev) {
+            renderMarkdown(ev.target);
+        }
+
+        async function handleRenderRaw() {
+            const q = window.location.search.substring(1).split('=')[1];
+            console.log(q)
+            if (q) await decompress(q).then(writeOnEditor);
+        }
+
+        function writeOnEditor(text) {
+            document.getElementById('editor').innerText = text
+        }
+
+        function handleBodyLoad() {
+            const editor = document.getElementById('editor')
+            handleRenderRaw().then(() => renderMarkdown(editor));
+            editor.addEventListener('input', handleTextEdit)
+            
+            var isActive = false;
+            editor.addEventListener('keydown', (e) => {
+                if (e.key == 'Escape') {
+                    handleRenderMarkdown(e);
+                    isActive = false;
+                }
+            })
+            editor.addEventListener('click', (e) => {
+                if (!isActive) handleRenderRaw(e);
+                isActive = true;
+            })
+        }
+
+        handleBodyLoad()
+    </script>
+</body>
+</html>
