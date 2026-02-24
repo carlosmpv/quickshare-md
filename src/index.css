@@ -1,0 +1,20 @@
+html,
+body {
+    margin: 0px;
+    padding: 0px;
+}
+
+body {
+    font-family: 'Courier New', Courier, monospace;
+    display: block;
+}
+
+.eof-wrapper {
+    position: relative;
+    display: flex;
+    justify-content: center;
+}
+
+code {   
+    text-align: center;
+}

@@ -1,3 +1,0 @@
-[submodule "vendor/dompurify"]
-	path = vendor/dompurify
-	url = https://github.com/cure53/DOMPurify.git

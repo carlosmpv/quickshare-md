@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quick Share MD</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
-    <script src="vendor/dompurify/dist/purify.min.js"></script>
     <link rel="icon" href="https://raw.githubusercontent.com/carlosmpv/quickshare/refs/heads/main/logo.svg" type="image/svg+xml">
 
     <meta name="description" content="Quick Share MD - Instantly share Markdown via URL. Real-time editor, safe preview, no server required.">
@@ -15,66 +14,16 @@
     <meta property="og:title" content="Quick Share MD - Instant Markdown Sharing">
     <meta property="og:description" content="Create and share Markdown documents with a single link. No signup, free, instant.">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://your-domain.com">
+    <meta property="og:url" content="https://carlosmpv.github.io">
     <meta property="og:image" content="https://raw.githubusercontent.com/carlosmpv/quickshare/refs/heads/main/og-image.png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Quick Share MD">
     <meta name="twitter:description" content="Markdown editor with URL-based sharing">
-    <link rel="canonical" href="https://your-domain.com">
+    <link rel="canonical" href="https://carlosmpv.github.io">
 
-    <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link rel="preconnect" href="https://raw.githubusercontent.com">
     <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-
-    <style>
-        html, body {
-            margin: 0px;
-            padding: 0px;
-        }
-
-        * {
-            box-sizing: border-box;
-        }
-
-        #editor {
-            width: 100vw;
-            height: 100vh;
-            overflow-y: scroll;
-            overflow-x: auto;
-            padding: 2em;
-            font-family: 'Courier New', Courier, monospace;
-            word-wrap: break-word;
-        }
-
-        #preview:active {
-            background-color: #e8e8e8;
-            scale: 0.8;
-        }
-
-        .preview-wrapper {
-            position: fixed;
-            bottom: 0;
-            right: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-        }
-
-        #preview {
-            width: 75px;
-            height: 75px;
-            border: none;
-            border-radius: 20px;
-            margin: 10px;
-            box-shadow: 0px 0px 5px 1px #222222;
-            background-color: #f8f8f8;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-    </style>
-
+    <script src="src/index.ts"></script>
     <script type="application/ld+json">
         {
             "@context": "https://schema.org",
@@ -100,109 +49,9 @@
 </head>
 <body>
     <base target="_blank">
-    <div class="preview-wrapper">
-        <code>Preview <br/>(Esc)</code>
-        <button id="preview" title="Preview">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12,9A3,3 0 0,1 15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 12,9M12,4.5C17,4.5 21.27,7.61 23,12C21.27,16.39 17,19.5 12,19.5C7,19.5 2.73,16.39 1,12C2.73,7.61 7,4.5 12,4.5M3.18,12C4.83,15.36 8.24,17.5 12,17.5C15.76,17.5 19.17,15.36 20.82,12C19.17,8.64 15.76,6.5 12,6.5C8.24,6.5 4.83,8.64 3.18,12Z" /></svg></svg>
-        </button>
+    <markdown-editor content=""></markdown-editor>
+    <div class="eof-wrapper">
+        <code>&lt;&lt; EOF &gt;&gt;</code>
     </div>
-    <div id="editor" contenteditable="true" aria-label="Markdown editor" role="textbox"></div>
-    
-
-    <script>
-        async function compress(text) {
-            const readableStream = new ReadableStream({
-                start(controler) {
-                    controler.enqueue(new TextEncoder().encode(text));
-                    controler.close();
-                }
-            })
-
-            const compressionStream = readableStream.pipeThrough(
-                new CompressionStream("gzip")
-            )
-
-            const blob = await new Response(compressionStream).blob();
-            return await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                reader.readAsDataURL(blob);
-            });
-        }
-
-        async function decompress(q) {
-            const bin = atob(q);
-            const bytes = Uint8Array.from(bin, c => c.charCodeAt(0))
-            const stream = new ReadableStream({
-                start(controler) {
-                    controler.enqueue(bytes);
-                    controler.close();
-                }
-            })
-
-            const decompressed = stream.pipeThrough(
-                new DecompressionStream("gzip")
-            );
-
-            return await new Response(decompressed).text();
-        }
-
-        function storeStateOnURL(b64) {
-            window.history.pushState({}, '', `?q=${b64}`);
-        }
-
-        function handleTextEdit(ev) {
-            compress(ev.target.innerText).then(storeStateOnURL)
-        }
-
-        function renderMarkdown(target) {
-            target.innerHTML = DOMPurify.sanitize(marked.parse(target.innerText))
-            
-            target.querySelectorAll('a').forEach(link => {
-                link.setAttribute('contenteditable', 'false');
-                link.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                });
-            })
-        }
-
-
-        async function handleRenderRaw() {
-            const q = window.location.search.substring(1).split('=')[1];
-            if (q) await decompress(q).then(writeOnEditor);
-        }
-
-        function writeOnEditor(text) {
-            document.getElementById('editor').innerText = text
-        }
-
-        function handleBodyLoad() {
-            const editor = document.getElementById('editor')
-            handleRenderRaw().then(() => renderMarkdown(editor));
-            editor.addEventListener('input', handleTextEdit)
-            
-            var isActive = false;
-            editor.addEventListener('keydown', (e) => {
-                if (e.key == 'Escape') {
-                    renderMarkdown(editor);
-                    isActive = false;
-                }
-            })
-            editor.addEventListener('click', (e) => {
-                if (!isActive) handleRenderRaw(e);
-                isActive = true;
-            })
-
-            const previewButton = document.getElementById('preview');
-            previewButton.addEventListener('click', (e) => {
-                if (isActive) {
-                    renderMarkdown(editor);
-                    isActive = false;
-                }
-            })
-        }
-
-        handleBodyLoad();
-    </script>
 </body>
 </html>
