@@ -18,9 +18,12 @@ body {
 
 .editor-wrapper {
     width: 100%;
+    min-height: 100vh;
+    padding: 3em 0px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    
 }
 
 code {   

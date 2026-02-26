@@ -188,7 +188,6 @@ class MarkdownEditBlock extends HTMLElement {
     }
 
     override focus(options?: FocusOptions): void {
-        console.log("focused")
         this.textareaEl.focus(options);
     }
 
@@ -209,7 +208,7 @@ class MarkdownEditBlock extends HTMLElement {
 
     handleKeyDown(e: KeyboardEvent) {
         const target = e.target! as HTMLTextAreaElement;
-        var lineBreakChage: number = 0
+        var lineChanges = 0;
 
         switch (e.key) {
             case 'Tab':
@@ -226,7 +225,6 @@ class MarkdownEditBlock extends HTMLElement {
                         const end = target.selectionEnd;
                         target.value = value.substring(0, start) + TABSTRING + value.substring(end);
                     }
-                    this.updateTextAreaRows()
                     break;
                 }
 
@@ -238,9 +236,10 @@ class MarkdownEditBlock extends HTMLElement {
                             shouldCreateNext: false,
                             shouldDeleteCurrent: target.value === '',
                         });
+                    } else {
+                        lineChanges = -(target.value.substring(target.selectionStart - 1, target.selectionEnd).match(/\n/g) || []).length;
                     }
 
-                    this.updateTextAreaRows()
                     break
                 }
 
@@ -265,8 +264,9 @@ class MarkdownEditBlock extends HTMLElement {
                             shouldCreateNext: true,
                             shouldDeleteCurrent: false,
                         });
+                    } else {
+                        lineChanges = 1;
                     }
-                    this.updateTextAreaRows()
                     break;
                 }
 
@@ -296,18 +296,19 @@ class MarkdownEditBlock extends HTMLElement {
                 break;
 
             default:
-                this.updateTextAreaRows()
                 this.text = target.value;
                 this.dispatchTextChange({
                     content: target.value
                 })
         }
+
+        this.updateTextAreaRows(lineChanges);
     }
 
-    updateTextAreaRows() {
+    updateTextAreaRows(lineChanges: number = 0) {
         const lineBreakCount = (this.textareaEl.value.match(/\n/g) || []).length + 1;
         const lineOverflowCount = this.textareaEl.value.split("\n").map(line => (line.length / (LINELENGTH - TAB_LINEBREAK_DELAY)) >> 0).reduce((a, b) => a + b);
-        this.textareaRows = lineBreakCount + lineOverflowCount;
+        this.textareaRows = lineBreakCount + lineOverflowCount + lineChanges;
         this.textareaEl.setAttribute('rows', this.textareaRows.toString());
     }
 }
@@ -360,12 +361,30 @@ class MarkdownEditor extends HTMLElement {
         this.blocksParent = document.createElement('div')
         this.shadowRoot!.appendChild(this.blocksParent);
         this.addEventListener('keydown', this.handleKeyPress.bind(this))
+
+        this.parentElement?.addEventListener('click', this.handleClickOuside.bind(this));
+    }
+
+    private createFirstEditBlock() {
+        const firstEditBlock = this.createEditBlock()
+        this.blocksParent.appendChild(firstEditBlock);
+        this.activeBlock = firstEditBlock;
     }
 
     private addListenersToEditBlock(block: MarkdownEditBlock) {
         block.addEventListener('gotonextblock', this.handleGotoNextBlock.bind(this));
         block.addEventListener('gotopreviousblock', this.handleGotoPreviousBlock.bind(this));
         block.addEventListener('textchange', this.handleTextChange.bind(this));
+    }
+
+    private handleClickOuside(e: Event) {
+        if (this.activeBlock === null) {
+            if (Array.from(this.blocksParent.children).length === 0) {
+                this.createFirstEditBlock();
+            }
+
+            this.activeBlock = this.blocksParent.firstChild as MarkdownBlock;
+        }
     }
 
     private handleKeyPress(e: KeyboardEvent) {
@@ -424,9 +443,7 @@ class MarkdownEditor extends HTMLElement {
             const plainText = await decompress(q);
             this.blockFromPlainText(plainText);
         } else {
-            const firstEditBlock = this.createEditBlock()
-            this.blocksParent.appendChild(firstEditBlock);
-            this.activeBlock = firstEditBlock;
+            this.createFirstEditBlock();
         }
     }
 
