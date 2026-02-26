@@ -4,10 +4,12 @@ import { Marked } from 'marked';
 
 const TABSIZE = 2;
 const TABSTRING = ' '.repeat(TABSIZE);
+const LINELENGTH = 80;
+const TAB_LINEBREAK_DELAY = 3; // magic value for text area rows work properly
 const marked = new Marked();
 
 async function compress(text: string): Promise<string> {
-    
+
     const readableStream = new ReadableStream({
         start(controler) {
             controler.enqueue(new TextEncoder().encode(text));
@@ -107,7 +109,8 @@ class MarkdownResultBlock extends HTMLElement {
         styleEl.textContent = `
         div {
             box-sizing: content-box;
-            padding: 0px 0px 0px 7px;
+            width: 80ch;
+            word-break: break-all;
         }
 
         p {
@@ -156,11 +159,15 @@ class MarkdownEditBlock extends HTMLElement {
         textarea {
             all: unset;
             display: block;
-            width: 100%;
-            padding: 0px 0px 0px 5px;
             font: inherit;
             background-color: white;
-            border-left: #1a5fb4 3px solid;
+            border-left: #1a5fb4 4px solid;
+            padding-left: 1em;
+            margin-left: calc(-1em - 4px);
+            width: ${LINELENGTH}ch;
+            word-break: break-all;
+            white-space: pre-wrap;
+            box-sizing: border-box;
         }
         `;
         this.shadowRoot!.appendChild(styleEl);
@@ -170,8 +177,10 @@ class MarkdownEditBlock extends HTMLElement {
 
     connectedCallback() {
         this.textareaEl.setAttribute('rows', this.textareaRows.toString());
+        this.textareaEl.setAttribute('cols', LINELENGTH.toString());
         this.textareaEl.addEventListener('keydown', this.handleKeyDown.bind(this));
         this.shadowRoot!.appendChild(this.textareaEl)
+        this.updateTextAreaRows();
     }
 
     render(): MarkdownResultBlock {
@@ -179,6 +188,7 @@ class MarkdownEditBlock extends HTMLElement {
     }
 
     override focus(options?: FocusOptions): void {
+        console.log("focused")
         this.textareaEl.focus(options);
     }
 
@@ -199,6 +209,7 @@ class MarkdownEditBlock extends HTMLElement {
 
     handleKeyDown(e: KeyboardEvent) {
         const target = e.target! as HTMLTextAreaElement;
+        var lineBreakChage: number = 0
 
         switch (e.key) {
             case 'Tab':
@@ -215,17 +226,12 @@ class MarkdownEditBlock extends HTMLElement {
                         const end = target.selectionEnd;
                         target.value = value.substring(0, start) + TABSTRING + value.substring(end);
                     }
+                    this.updateTextAreaRows()
                     break;
                 }
 
             case 'Backspace':
                 {
-                    const removedLBCount = (target.value.substring(target.selectionStart - 1, target.selectionEnd).match(/\n/g) || []).length;
-                    if (target.value[target.selectionEnd] === undefined) {
-                        this.textareaRows -= removedLBCount;
-                        this.textareaEl.setAttribute('rows', this.textareaRows.toString());
-                    }
-
                     if (target.selectionEnd == 0) {
                         e.preventDefault();
                         this.dispatchGotoPreviousBlock({
@@ -233,6 +239,8 @@ class MarkdownEditBlock extends HTMLElement {
                             shouldDeleteCurrent: target.value === '',
                         });
                     }
+
+                    this.updateTextAreaRows()
                     break
                 }
 
@@ -241,30 +249,24 @@ class MarkdownEditBlock extends HTMLElement {
                     const value = target.value;
                     const lbIndex = value.lastIndexOf('\n', target.selectionStart);
                     const trailingSpaceCount = (value.substring(lbIndex + 1).match(/^ */g) || [""])[0].length;
-                    if (trailingSpaceCount > 0) {
+                    if (trailingSpaceCount > 0) { // Keeps indentation
                         e.preventDefault();
                         target.value += '\n' + ' '.repeat(trailingSpaceCount)
                     }
-
-                    const lineBreakCount = (target.value.substring(0, target.selectionStart).match(/\n/g) || []).length + 1;
-                    if (lineBreakCount >= this.textareaRows) {
-                        this.textareaRows++;
-                        this.textareaEl.setAttribute('rows', this.textareaRows.toString());
-                    }
-
                     if (target.selectionStart === 0 && target.selectionEnd === 0 && target.value[target.selectionEnd] !== undefined) {
                         e.preventDefault();
                         this.dispatchGotoPreviousBlock({
                             shouldCreateNext: true,
                             shouldDeleteCurrent: false,
                         });
-                    } else if (value[target.selectionEnd - 1] == '\n') {
+                    } else if (target.selectionEnd == value.length && value[target.selectionEnd - 1] == '\n') {
                         e.preventDefault();
                         this.dispatchGotoNextBlock({
                             shouldCreateNext: true,
                             shouldDeleteCurrent: false,
                         });
                     }
+                    this.updateTextAreaRows()
                     break;
                 }
 
@@ -294,20 +296,51 @@ class MarkdownEditBlock extends HTMLElement {
                 break;
 
             default:
+                this.updateTextAreaRows()
                 this.text = target.value;
                 this.dispatchTextChange({
                     content: target.value
                 })
         }
     }
+
+    updateTextAreaRows() {
+        const lineBreakCount = (this.textareaEl.value.match(/\n/g) || []).length + 1;
+        const lineOverflowCount = this.textareaEl.value.split("\n").map(line => (line.length / (LINELENGTH - TAB_LINEBREAK_DELAY)) >> 0).reduce((a, b) => a + b);
+        this.textareaRows = lineBreakCount + lineOverflowCount;
+        this.textareaEl.setAttribute('rows', this.textareaRows.toString());
+    }
 }
 
 type MarkdownBlock = MarkdownEditBlock | MarkdownResultBlock
 
 class MarkdownEditor extends HTMLElement {
-    private markdownBlocks: MarkdownBlock[] = [];
-    private activeBlock: number = -1;
     private updateTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+    private blocksParent: HTMLDivElement;
+    private _activeBlock: MarkdownBlock | null = null;
+
+    private get activeBlock(): MarkdownBlock | null {
+        return this._activeBlock;
+    }
+
+    private set activeBlock(block: MarkdownBlock) {
+        if (this._activeBlock instanceof MarkdownEditBlock) {
+            const replacement = this._activeBlock.render()
+            this.addListenersToResultBlock(replacement)
+            this._activeBlock.replaceWith(replacement)
+        }
+
+        if (block instanceof MarkdownResultBlock) {
+            const replacement = block.edit()
+            this.addListenersToEditBlock(replacement)
+            block.replaceWith(replacement)
+            this._activeBlock = replacement;
+            this._activeBlock.focus(); // always focus when set
+        } else {
+            this._activeBlock = block;
+            this._activeBlock.focus(); // always focus when set
+        }
+    }
 
     constructor(
         public content: string = '',
@@ -317,15 +350,15 @@ class MarkdownEditor extends HTMLElement {
 
         const styleEl = document.createElement('style');
         styleEl.textContent = `
-        :host {
+        div {
             display: block;
             width: 100%;
-            padding: 1em;
-            border-bottom: 2px solid black;
         }
         `;
         this.shadowRoot!.appendChild(styleEl);
 
+        this.blocksParent = document.createElement('div')
+        this.shadowRoot!.appendChild(this.blocksParent);
         this.addEventListener('keydown', this.handleKeyPress.bind(this))
     }
 
@@ -355,18 +388,34 @@ class MarkdownEditor extends HTMLElement {
         URL.revokeObjectURL(url);
     }
 
+    private createEditBlock(
+        textareaRows: number = 1,
+        text: string = '',
+    ): MarkdownEditBlock {
+        const editBlock = new MarkdownEditBlock(textareaRows, text);
+        this.addListenersToEditBlock(editBlock);
+        return editBlock;
+    }
+
+    private createResultBlock(
+        text: string = '',
+    ): MarkdownResultBlock {
+        const resultBlock = new MarkdownResultBlock(text);
+        this.addListenersToResultBlock(resultBlock);
+        return resultBlock;
+    }
+
+
     private addListenersToResultBlock(block: MarkdownResultBlock) {
         block.addEventListener('click', this.handleGotoBlock.bind(this));
     }
 
     private blockFromPlainText(plainText: string) {
-        this.markdownBlocks = plainText.split('\n\n').map(v => {
-            const block = new MarkdownResultBlock(v);
-            this.addListenersToResultBlock(block);
-            return block
-        });
+        const blocks = plainText
+            .split('\n\n')
+            .map(v => this.createResultBlock(v));
 
-        this.shadowRoot!.append(...this.markdownBlocks);
+        this.blocksParent.append(...blocks);
     }
 
     async connectedCallback() {
@@ -375,15 +424,15 @@ class MarkdownEditor extends HTMLElement {
             const plainText = await decompress(q);
             this.blockFromPlainText(plainText);
         } else {
-            const firstEditBlock = document.createElement('markdown-edit-block') as MarkdownEditBlock;
-            this.activeBlock = 0;
-            this.addListenersToEditBlock(firstEditBlock);
-            this.appendBlock(firstEditBlock);
+            const firstEditBlock = this.createEditBlock()
+            this.blocksParent.appendChild(firstEditBlock);
+            this.activeBlock = firstEditBlock;
         }
     }
 
     handleTextChange(e: TextChangeEvent) {
-        this.content = this.markdownBlocks.map(b => b.text).join('\n\n');
+        this.content = (Array.from(this.blocksParent.children) as MarkdownBlock[]).map((b) => b.text).join('\n\n');
+
         if (this.updateTimeoutRef) {
             clearTimeout(this.updateTimeoutRef);
         }
@@ -391,121 +440,30 @@ class MarkdownEditor extends HTMLElement {
         this.updateTimeoutRef = setTimeout(async () => await compress(this.content).then(storeStateOnURL), 500);
     }
 
+
     handleGotoBlock(e: Event) {
-        const childBlocks = Array.from(this.shadowRoot!.childNodes).filter(p => p.nodeName != 'STYLE')
         const target = e.target! as MarkdownBlock;
-
-        const previousActiveBlock = this.activeBlock;
-        this.activeBlock = Array.prototype.indexOf.call(childBlocks, target);
-        if (target instanceof MarkdownResultBlock) {
-            const replacement = target.edit();
-            this.addListenersToEditBlock(replacement);
-            target.replaceWith(replacement);
-            replacement.focus();
-            this.markdownBlocks[this.activeBlock] = replacement;
-        } else {
-            target.focus();
-        }
-
-        const previousBlock = this.markdownBlocks[previousActiveBlock];
-        if (previousActiveBlock >= 0 && previousBlock instanceof MarkdownEditBlock) {
-            const replacement = previousBlock.render();
-            this.addListenersToResultBlock(replacement);
-            previousBlock.replaceWith(replacement);
-            this.markdownBlocks[previousActiveBlock] = replacement
-        }
+        this.activeBlock = target;
     }
 
     handleGotoPreviousBlock(e: GotoPreviousBlockEvent) {
-        const previousActiveBlock = this.activeBlock; // keeps 0 on new active
-        let unchanged = false;
-        if (this.activeBlock === 0) {
-            if (e.detail.shouldCreateNext) {
-                const newActiveBlock = document.createElement('markdown-edit-block') as MarkdownEditBlock;
-                this.addListenersToEditBlock(newActiveBlock);
-                this.prependBlock(newActiveBlock);
-                newActiveBlock.focus();
-            } else {
-                unchanged = true
-            }
-        } else {
-            this.activeBlock--;
-            const target = this.markdownBlocks[this.activeBlock]! as MarkdownResultBlock;
-            const replacement = target.edit();
-            this.addListenersToEditBlock(replacement);
-            target.replaceWith(replacement);
-            replacement.focus();
-            this.markdownBlocks[this.activeBlock] = replacement;
-        }
+        if (e.detail.shouldCreateNext)
+            this.activeBlock!.before(this.createEditBlock())
 
-        if (!unchanged) {
-            const current = this.markdownBlocks[previousActiveBlock]! as MarkdownEditBlock;
-            if (e.detail.shouldDeleteCurrent) {
-                current.remove();
-                this.markdownBlocks.splice(previousActiveBlock, 1);
-                
-            } else {
-                const replacement = current.render();
-                this.addListenersToResultBlock(replacement);
-                current.replaceWith(replacement);
-                this.markdownBlocks[previousActiveBlock] = replacement;
-            }
-        }
+        if (this.activeBlock!.previousSibling === null)
+            return;
+
+        this.activeBlock = this.activeBlock!.previousSibling! as MarkdownBlock;
     }
 
     handleGotoNextBlock(e: GotoNextBlockEvent) {
-        const previousActiveBlock = this.activeBlock;
-        let unchanged = false;
-        if (this.activeBlock === this.markdownBlocks.length - 1) {
-            if (e.detail.shouldCreateNext) {
-                const newActiveBlock = new MarkdownEditBlock();
-                this.appendBlock(newActiveBlock);
-                this.addListenersToEditBlock(newActiveBlock);
-                newActiveBlock.focus();
-                this.activeBlock++;
-            } else {
-                unchanged = true
-            }
-        } else {
-            this.activeBlock++;
-            const target = this.markdownBlocks[this.activeBlock]! as MarkdownResultBlock;
-            const replacement = target.edit();
-            this.addListenersToEditBlock(replacement);
-            target.replaceWith(replacement);
-            replacement.focus();
-            this.markdownBlocks[this.activeBlock] = replacement;
-        }
+        if (e.detail.shouldCreateNext)
+            this.activeBlock!.after(this.createEditBlock()) // else unchanged? 
 
-        if (!unchanged) {
-            const current = this.markdownBlocks[previousActiveBlock]! as MarkdownEditBlock;
-            if (e.detail.shouldDeleteCurrent) {
-                current.remove();
-                this.markdownBlocks.splice(previousActiveBlock, 1);
-            } else {
-                const replacement = current.render()
-                this.addListenersToResultBlock(replacement);
-                current.replaceWith(replacement);
-                this.markdownBlocks[previousActiveBlock] = replacement;
-            }
-        }
-    }
+        if (this.activeBlock!.nextSibling === null)
+            return;
 
-    prependBlock(block: MarkdownBlock) {
-        this.markdownBlocks = [
-            block,
-            ...this.markdownBlocks
-        ]
-
-        this.shadowRoot!.prepend(block);
-    }
-
-    appendBlock(block: MarkdownBlock) {
-        this.markdownBlocks = [
-            ...this.markdownBlocks,
-            block
-        ]
-
-        this.shadowRoot!.append(block);
+        this.activeBlock = this.activeBlock!.nextSibling! as MarkdownBlock;
     }
 }
 

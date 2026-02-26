@@ -10,9 +10,17 @@ body {
 }
 
 .eof-wrapper {
+    border-top: 3px solid black;
     position: relative;
     display: flex;
     justify-content: center;
+}
+
+.editor-wrapper {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 
 code {   
